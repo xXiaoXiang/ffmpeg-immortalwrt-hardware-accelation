@@ -121,7 +121,7 @@ jobs:
 
       # 8. 上传编译好的 FFmpeg
       - name: Upload FFmpeg build
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-build
           path: sdk/staging_dir/usr/bin/ffmpeg
