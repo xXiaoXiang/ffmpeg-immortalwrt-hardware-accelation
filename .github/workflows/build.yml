@@ -1,0 +1,127 @@
+name: Build FFmpeg with ImmortalWrt SDK and Hardware Acceleration
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. 设置构建环境
+      - name: Set up build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ cmake ninja-build \
+                                 pkg-config libelf-dev zlib1g-dev libglib2.0-dev \
+                                 autoconf automake libtool git cpio rsync python3 \
+                                 python3-pip file wget unzip \
+                                 libva-dev libva-utils intel-media-va-driver \
+                                 intel-media-va-driver-non-free \
+                                 nvidia-cuda-toolkit libnvidia-encode1 \
+                                 mesa-va-drivers
+
+      # 3. 下载并解压 ImmortalWrt SDK
+      - name: Download and extract ImmortalWrt SDK
+        run: |
+          wget https://downloads.immortalwrt.org/releases/24.10.0/targets/x86/64/immortalwrt-sdk-24.10.0-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          tar --use-compress-program=unzstd -xvf immortalwrt-sdk-24.10.0-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          mv immortalwrt-sdk-24.10.0-x86-64_gcc-13.3.0_musl.Linux-x86_64 sdk
+
+      # 4. 配置 ImmortalWrt SDK
+      - name: Configure ImmortalWrt SDK
+        run: |
+          cd sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install ffmpeg
+          cp ../feeds.conf.default .
+          cp ../.config .
+
+      # 5. 编译 FFmpeg 依赖（静态库）
+      - name: Compile FFmpeg dependencies (static libraries)
+        run: |
+          mkdir -p ~/ffmpeg-deps && cd ~/ffmpeg-deps
+          export PREFIX=$(pwd)/install
+          export PATH=$PREFIX/bin:$PATH
+
+          # 编译 libx264
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git
+          cd x264 && ./configure --prefix=$PREFIX --enable-static --enable-pic && make -j$(nproc) && make install && cd ..
+
+          # 编译 libx265
+          git clone --depth 1 https://bitbucket.org/multicoreware/x265_git.git
+          cd x265/build/linux && cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX=$PREFIX -DENABLE_SHARED=OFF ../../source && make -j$(nproc) && make install && cd ../../..
+
+          # 编译 libvpx
+          git clone --depth 1 https://chromium.googlesource.com/webm/libvpx.git
+          cd libvpx && ./configure --prefix=$PREFIX --disable-examples --disable-unit-tests --enable-vp9-highbitdepth --as=yasm && make -j$(nproc) && make install && cd ..
+
+          # 编译 libopus
+          git clone --depth 1 https://github.com/xiph/opus.git
+          cd opus && ./autogen.sh && ./configure --prefix=$PREFIX --enable-static --disable-shared && make -j$(nproc) && make install && cd ..
+
+          # 编译 libfdk-aac
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
+          cd fdk-aac && autoreconf -fiv && ./configure --prefix=$PREFIX --enable-static --disable-shared && make -j$(nproc) && make install && cd ..
+
+          echo "FFmpeg dependencies compiled successfully!"
+
+      # 6. 下载并配置 FFmpeg
+      - name: Download and configure FFmpeg
+        run: |
+          git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
+          cd ffmpeg
+          export STAGING_DIR=$(pwd)/../sdk/staging_dir
+          export PREFIX=~/ffmpeg-deps/install
+          export PATH=$PREFIX/bin:$STAGING_DIR/toolchain-x86_64_gcc-*/bin:$PATH
+          export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
+          export CROSS_COMPILE=x86_64-openwrt-linux-
+          
+          ./configure \
+            --enable-cross-compile \
+            --cross-prefix=$CROSS_COMPILE \
+            --arch=x86_64 \
+            --target-os=linux \
+            --prefix=$STAGING_DIR/usr \
+            --pkg-config=pkg-config \
+            --enable-gpl \
+            --enable-nonfree \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libvpx \
+            --enable-libopus \
+            --enable-libfdk-aac \
+            --enable-vaapi \
+            --enable-hwaccel=h264_vaapi \
+            --enable-hwaccel=hevc_vaapi \
+            --enable-hwaccel=vp9_vaapi \
+            --enable-libdrm \
+            --enable-libmfx \
+            --enable-nvenc \
+            --enable-cuda \
+            --enable-cuvid \
+            --enable-amf \
+            --extra-cflags="-I$PREFIX/include" \
+            --extra-ldflags="-L$PREFIX/lib" \
+            --enable-static --disable-shared
+
+      # 7. 编译并安装 FFmpeg
+      - name: Compile and install FFmpeg
+        run: |
+          cd ffmpeg
+          make -j$(nproc)
+          make install
+
+      # 8. 上传编译好的 FFmpeg
+      - name: Upload FFmpeg build
+        uses: actions/upload-artifact@v3
+        with:
+          name: ffmpeg-build
+          path: sdk/staging_dir/usr/bin/ffmpeg
