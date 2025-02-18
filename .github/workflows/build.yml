@@ -13,7 +13,7 @@ jobs:
     steps:
       # 1. 检出代码
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # 2. 设置构建环境
       - name: Set up build environment
