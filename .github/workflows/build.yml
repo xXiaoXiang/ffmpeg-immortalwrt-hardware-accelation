@@ -23,9 +23,9 @@ jobs:
                                  pkg-config libelf-dev zlib1g-dev libglib2.0-dev \
                                  autoconf automake libtool git cpio rsync python3 \
                                  python3-pip file wget unzip \
-                                 libva-dev libva-utils intel-media-va-driver \
+                                 libva-dev intel-media-va-driver \
                                  intel-media-va-driver-non-free \
-                                 nvidia-cuda-toolkit libnvidia-encode1 \
+                                 nvidia-cuda-toolkit nvidia-driver \
                                  mesa-va-drivers
 
       # 3. 下载并解压 ImmortalWrt SDK
